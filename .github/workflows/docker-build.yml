@@ -8,7 +8,7 @@ on:
       version:
         description: 'Flink CDC Version'
         required: true
-        default: '3.0.0'
+        default: '3.0.1'
 
 jobs:
   build:
@@ -16,16 +16,6 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
-        
-      - name: Set up JDK 11
-        uses: actions/setup-java@v3
-        with:
-          java-version: '11'
-          distribution: 'temurin'
-          cache: 'maven'
-        
-      - name: Build with Maven
-        run: mvn clean install -DskipTests
         
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v2
@@ -54,15 +44,52 @@ jobs:
               topic: example-topic
               format: json
           EOF
+          
+      - name: Create Entrypoint Script
+        run: |
+          cat > docker-entrypoint.sh << 'EOF'
+          #!/bin/bash
+          
+          # Start the Flink JobManager
+          exec /opt/flink/bin/jobmanager.sh start-foreground
+          EOF
+          
+      - name: Create Custom Dockerfile
+        run: |
+          cat > Dockerfile.custom << 'EOF'
+          FROM flink:1.17.1
+          
+          # Create required directories
+          RUN mkdir -p /opt/flink-cdc/lib
+          RUN mkdir -p /opt/flink-cdc/conf
+          RUN mkdir -p /opt/flink/usrlib
+          
+          # Environment variables
+          ENV FLINK_CDC_HOME=/opt/flink-cdc
+          
+          # Download required dependencies
+          RUN apt-get update && apt-get install -y wget && \
+              # Download CDC connectors
+              wget -P /opt/flink/usrlib/ https://repo1.maven.org/maven2/com/ververica/flink-sql-connector-mysql-cdc/3.0.1/flink-sql-connector-mysql-cdc-3.0.1.jar && \
+              wget -P /opt/flink/usrlib/ https://repo1.maven.org/maven2/com/ververica/flink-sql-connector-sqlserver-cdc/3.0.1/flink-sql-connector-sqlserver-cdc-3.0.1.jar && \
+              wget -P /opt/flink/usrlib/ https://repo1.maven.org/maven2/org/apache/flink/flink-connector-kafka/1.17.1/flink-connector-kafka-1.17.1.jar && \
+              wget -P /opt/flink/usrlib/ https://repo1.maven.org/maven2/org/apache/flink/flink-json/1.17.1/flink-json-1.17.1.jar
+          
+          # Copy pipeline configuration
+          COPY pipeline-conf.yaml $FLINK_CDC_HOME/conf/
+          
+          # Add custom entrypoint script
+          COPY docker-entrypoint.sh /
+          RUN chmod +x /docker-entrypoint.sh
+          
+          ENTRYPOINT ["/docker-entrypoint.sh"]
+          EOF
         
       - name: Build and Push Docker Image
         uses: docker/build-push-action@v4
         with:
           context: .
-          file: ./Dockerfile
+          file: ./Dockerfile.custom
           platforms: linux/amd64
           push: true
-          tags: adafef2e596e/flink-cdc:${{ github.event.inputs.version || '3.0.0' }}
-          build-args: |
-            FLINK_CDC_VERSION=${{ github.event.inputs.version || '3.0.0' }}
-            PIPELINE_DEFINITION_FILE=pipeline-conf.yaml
+          tags: adafef2e596e/flink-cdc:${{ github.event.inputs.version || '3.0.1' }}
