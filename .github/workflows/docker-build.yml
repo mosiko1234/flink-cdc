@@ -59,7 +59,7 @@ jobs:
         uses: docker/build-push-action@v4
         with:
           context: .
-          file: ./flink-cdc-dist/src/main/docker/Dockerfile
+          file: ./Dockerfile
           platforms: linux/amd64
           push: true
           tags: adafef2e596e/flink-cdc:${{ github.event.inputs.version || '3.0.0' }}
